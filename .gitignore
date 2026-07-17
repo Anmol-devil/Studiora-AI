@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+.venv/
+venv/
+
+# Environment
+.env
+*.env
+ani.env
+
+# Uploads
+uploads/*
+!uploads/.gitkeep
+
+backend/uploads/*
+!backend/uploads/.gitkeep
+
+# Exports
+backend/exports/*
+!backend/exports/.gitkeep
+
+# VS Code
+.vscode/
+
+# Node
+frontend/node_modules/
+
+# Build
+frontend/dist/
+
+# OS
+.DS_Store
+desktop.ini
+Thumbs.db
+
+# Logs
+*.log
