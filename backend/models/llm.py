@@ -113,7 +113,6 @@ def _generation_stream(messages, state_key, model_name="glm-4-flash"):
         state[state_key] = full_response
         state["last_elapsed"][state_key] = elapsed
 
-    return StreamingResponse(event_stream(), media_type="text/plain")
     return StreamingResponse(
         event_stream(), 
         media_type="text/event-stream",
