@@ -19,9 +19,6 @@ uploads/*
 backend/uploads/*
 !backend/uploads/.gitkeep
 
-# Exports
-backend/exports/*
-!backend/exports/.gitkeep
 
 # VS Code
 .vscode/
