@@ -28,10 +28,13 @@ from models.llm import build_ask_prompt, stream_chat, _generation_stream
 from api.router import router as api_router
 
 app = FastAPI(title="AI Study Assistant API")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
+    allow_origins=[
+        "http://localhost:5173",
+    ],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
