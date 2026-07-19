@@ -41,6 +41,14 @@ os.makedirs("uploads", exist_ok=True)
 # Include the refactored routes
 app.include_router(api_router)
 
+
+@app.get("/")
+def home():
+    return {
+        "message": "Studiora AI Backend is running 🚀",
+        "docs": "/docs"
+    }
+
 @app.post("/api/upload")
 def upload_pdfs(files: List[UploadFile] = File(...)):
     documents = []
