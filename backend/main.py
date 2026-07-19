@@ -4,13 +4,21 @@ from io import BytesIO
 from typing import List
 
 def load_env_file(filepath="ani.env"):
-    if os.path.exists(filepath):
-        with open(filepath) as f:
+    # Get the absolute path to the backend directory
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    # The ani.env file is in the root directory, one level up
+    actual_path = os.path.join(base_dir, "..", filepath)
+    
+    if not os.path.exists(actual_path):
+        actual_path = filepath # Fallback
+
+    if os.path.exists(actual_path):
+        with open(actual_path) as f:
             for line in f:
                 line = line.strip()
                 if line and '=' in line and not line.startswith('#'):
                     k, v = line.split('=', 1)
-                    os.environ[k] = v
+                    os.environ[k.strip()] = v.strip()
 
 load_env_file()
 
@@ -233,7 +241,15 @@ async def ask(question: str = Form(...), mode: str = Form("Question Answering"))
             "retrieved": state["last_retrieved"],
         })
 
-    return StreamingResponse(event_stream(), media_type="text/plain")
+    return StreamingResponse(
+        event_stream(), 
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
 
 
 @app.post("/api/summary")
@@ -252,3 +268,4 @@ Document:
 {text[:5000]}
 """
     return _generation_stream([{"role": "user", "content": prompt}], "summary")
+
