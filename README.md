@@ -19,6 +19,16 @@
 
 </p>
 
+## 🌐 Live Demo
+
+🚀 **Frontend:** https://studiora-ai.vercel.app
+
+⚡ **Backend API:** https://studiora-ai.onrender.com
+
+📘 **API Documentation:** https://studiora-ai.onrender.com/docs
+
+---
+
 **Studiora AI** is a modern Retrieval-Augmented Generation (RAG) application that transforms PDF documents into an interactive AI-powered study platform.
 
 Upload one or multiple PDFs and instantly:
@@ -318,9 +328,9 @@ Studiora-AI/
 ## Clone Repository
 
 ```bash
-git clone https://github.com/yourusername/studiora-ai.git
+git clone https://github.com/Anmol-devil/Studiora-AI.git
 
-cd studiora-ai
+cd Studiora-AI
 ```
 
 ---
