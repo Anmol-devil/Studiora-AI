@@ -1,25 +1,13 @@
 import os
 import faiss
 import numpy as np
-from openai import OpenAI
+from sentence_transformers import SentenceTransformer
 
-client = OpenAI(
-    api_key=os.getenv("JINA_API_KEY"),
-    base_url="https://api.jina.ai/v1"
-)
+model = SentenceTransformer("all-MiniLM-L6-v2")
 
 def get_embeddings(texts):
-    response = client.embeddings.create(
-        model="jina-embeddings-v4",
-        input=texts
-    )
-
-    embeddings = np.array(
-        [item.embedding for item in response.data],
-        dtype=np.float32
-    )
-
-    return embeddings
+    embeddings = model.encode(texts, convert_to_numpy=True)
+    return embeddings.astype(np.float32)
 
 
 def build_index(documents):
