@@ -1,11 +1,12 @@
-from fastapi import APIRouter
-from state import state
+from fastapi import APIRouter, Header
+from state import get_session_state
 from models.llm import _generation_stream
 
 router = APIRouter()
 
 @router.post("/api/notes")
-def generate_notes_route():
+def generate_notes_route(x_session_id: str = Header(None)):
+    state = get_session_state(x_session_id)
     text = state["combined_text"]
     prompt = f"""
 You are an expert teacher.
@@ -20,4 +21,4 @@ Include:
 Document:
 {text[:20000]}
 """
-    return _generation_stream([{"role": "user", "content": prompt}], "notes")
+    return _generation_stream([{"role": "user", "content": prompt}], "notes", state)
