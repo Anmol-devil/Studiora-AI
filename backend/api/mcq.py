@@ -1,11 +1,12 @@
-from fastapi import APIRouter
-from state import state
+from fastapi import APIRouter, Header
+from state import get_session_state
 from models.llm import _generation_stream
 
 router = APIRouter()
 
 @router.post("/api/mcqs")
-def generate_mcqs_route():
+def generate_mcqs_route(x_session_id: str = Header(None)):
+    state = get_session_state(x_session_id)
     text = state["combined_text"]
     system_prompt = """You are a document-grounded MCQ generator.
 
@@ -22,6 +23,7 @@ RULES:
 7. Distractors must be plausible but contradicted by the document.
 8. Avoid yes/no questions.
 9. Avoid repeating terms already used as the main focus of previous questions.
+10. VERY IMPORTANT: You MUST output each option (A., B., C., D.) on a new line. Do not put multiple options on the same line.
 
 OUTPUT FORMAT:
 
@@ -56,4 +58,4 @@ Document:
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_prompt},
     ]
-    return _generation_stream(messages, "mcq")
+    return _generation_stream(messages, "mcq", state)
