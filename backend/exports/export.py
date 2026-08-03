@@ -1,9 +1,9 @@
 from io import BytesIO
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse, StreamingResponse
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet
-from state import state
+from state import get_session_state
 
 router = APIRouter()
 
@@ -26,7 +26,8 @@ def create_pdf(text, title="Study Notes"):
     return buffer
 
 @router.get("/api/export/{kind}")
-def export_pdf(kind: str):
+def export_pdf(kind: str, session_id: str = Query(None)):
+    state = get_session_state(session_id)
     if kind == "study-pack":
         sections = []
         for key, label in [
