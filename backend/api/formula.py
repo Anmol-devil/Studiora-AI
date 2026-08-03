@@ -1,11 +1,12 @@
-from fastapi import APIRouter
-from state import state
+from fastapi import APIRouter, Header
+from state import get_session_state
 from models.llm import _generation_stream
 
 router = APIRouter()
 
 @router.post("/api/formulas")
-def generate_formulas_route():
+def generate_formulas_route(x_session_id: str = Header(None)):
+    state = get_session_state(x_session_id)
     text = state["combined_text"]
     prompt = f"""
 You are an expert Mathematics Professor creating a textbook-style formula sheet.
@@ -19,6 +20,7 @@ Rules:
 6. Do not perform numerical substitutions inside the Description or Key Insight.
 7. Keep Description and Key Insight to one concise line each.
 8. All formulas must be valid LaTeX.
+9. If your formula contains regular words or text, you MUST wrap them in \\text{{}} so spaces render correctly (e.g., \\text{{Machine Learning with }} n \\text{{ layers}}).
 
 You must format EVERY formula using EXACTLY this template:
 
@@ -58,4 +60,5 @@ and template exactly. Output nothing except the formatted formula sheet.
 Document:
 {text[:50000]}
 """
-    return _generation_stream([{"role": "user", "content": prompt}], "formula")
+    return _generation_stream([{"role": "user", "content": prompt}], "formula", state)
+
