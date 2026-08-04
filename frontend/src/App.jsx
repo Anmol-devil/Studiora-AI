@@ -16,11 +16,64 @@ import {
   getHighlightUrl,
 } from "./api";
 
+const preprocessLaTeX = (text) => {
+  if (typeof text !== 'string') return text;
+  return text
+    .replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$$')
+    .replace(/\\\[([\s\S]*?)\\\]/g, '$$$$$1$$$$');
+};
+
+const extractLatex = (node) => {
+  if (!node) return "";
+  if (node.tagName === 'annotation' && node.properties?.encoding === 'application/x-tex') {
+    return node.children?.[0]?.value || "";
+  }
+  if (node.children) {
+    for (const child of node.children) {
+      const res = extractLatex(child);
+      if (res) return res;
+    }
+  }
+  return "";
+};
+
+const MathCopySpan = ({ node, className, children, ...props }) => {
+  const [copied, setCopied] = useState(false);
+
+  if (className && typeof className === 'string' && className.includes('katex-display')) {
+    const handleCopy = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const rawLatex = extractLatex(node);
+      if (rawLatex) {
+        navigator.clipboard.writeText(rawLatex);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      }
+    };
+
+    return (
+      <span className={`katex-copy-btn-wrap ${className}`} {...props}>
+        <button className="katex-copy-btn action-btn icon-only" onClick={handleCopy} title={copied ? "Copied!" : "Copy formula"}>
+          {copied ? (
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
+          ) : (
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
+          )}
+        </button>
+        {children}
+      </span>
+    );
+  }
+  return <span className={className} {...props}>{children}</span>;
+};
+
 const MODE_META = {
   "Question Answering": { icon: "💡", desc: "Short, direct answer" },
   "Detailed": { icon: "📖", desc: "5-8 line in-depth explanation" },
   "Exam Style": { icon: "🎓", desc: "University exam format" },
   "Tutor Mode": { icon: "🧑‍🏫", desc: "Step-by-step with examples" },
+  "Instruction Mode": { icon: "🛠️", desc: "Follow specific instructions" },
 };
 
 const TABS = [
@@ -32,7 +85,7 @@ const TABS = [
   { id: "flashcards", label: "Flashcards", icon: "🃏" },
 ];
 
-const ANSWER_MODES = ["Question Answering", "Detailed", "Exam Style", "Tutor Mode"];
+const ANSWER_MODES = ["Question Answering", "Detailed", "Exam Style", "Tutor Mode", "Instruction Mode"];
 
 const FEATURES = [
   { icon: "💬", label: "Chat with PDFs" },
@@ -89,8 +142,8 @@ function RetrievedChunks({ chunks, onChunkClick }) {
       {open && (
         <div className="retrieved-list">
           {chunks.map((c, i) => (
-            <div 
-              className="retrieved-card clickable-card" 
+            <div
+              className="retrieved-card clickable-card"
               key={i}
               onClick={() => onChunkClick && onChunkClick(c)}
               title="Click to view highlighted source page"
@@ -116,6 +169,7 @@ function RetrievedChunks({ chunks, onChunkClick }) {
 export default function App() {
   const [theme, setTheme] = useState("dark");
   const [sidebarWidth, setSidebarWidth] = useState(280);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isResizing, setIsResizing] = useState(false);
   const [activeTab, setActiveTab] = useState("chat");
   const [files, setFiles] = useState([]);
@@ -133,6 +187,7 @@ export default function App() {
   const [streamingAnswer, setStreamingAnswer] = useState(null);
   const [asking, setAsking] = useState(false);
   const [copiedIndex, setCopiedIndex] = useState(null);
+  const [abortController, setAbortController] = useState(null);
   const chatEndRef = useRef(null);
   const chatScrollRef = useRef(null);
   const isAtBottom = useRef(true);
@@ -145,17 +200,17 @@ export default function App() {
 
   // Generation panels: { content, loading, elapsed, chunks }
   const [panelState, setPanelState] = useState({
-    summary: { content: "", loading: false, elapsed: null },
-    notes: { content: "", loading: false, elapsed: null },
-    formulas: { content: "", loading: false, elapsed: null },
-    mcqs: { content: "", loading: false, elapsed: null },
-    flashcards: { content: "", loading: false, elapsed: null },
+    summary: { content: "", loading: false, elapsed: null, abortController: null },
+    notes: { content: "", loading: false, elapsed: null, abortController: null },
+    formulas: { content: "", loading: false, elapsed: null, abortController: null },
+    mcqs: { content: "", loading: false, elapsed: null, abortController: null },
+    flashcards: { content: "", loading: false, elapsed: null, abortController: null },
   });
 
   // Per-message retrieved chunks & elapsed
   const [lastChunks, setLastChunks] = useState([]);
   const [chatElapsed, setChatElapsed] = useState(null);
-  
+
   // Track temporary "completed" state for each tab
   const [completedTabs, setCompletedTabs] = useState({});
 
@@ -175,7 +230,7 @@ export default function App() {
       setSidebarWidth(newWidth);
     };
     const handleMouseUp = () => setIsResizing(false);
-    
+
     document.addEventListener("mousemove", handleMouseMove);
     document.addEventListener("mouseup", handleMouseUp);
     return () => {
@@ -228,11 +283,11 @@ export default function App() {
     setLastChunks([]);
     setChatElapsed(null);
     setPanelState({
-      summary: { content: "", loading: false, elapsed: null },
-      notes: { content: "", loading: false, elapsed: null },
-      formulas: { content: "", loading: false, elapsed: null },
-      mcqs: { content: "", loading: false, elapsed: null },
-      flashcards: { content: "", loading: false, elapsed: null },
+      summary: { content: "", loading: false, elapsed: null, abortController: null },
+      notes: { content: "", loading: false, elapsed: null, abortController: null },
+      formulas: { content: "", loading: false, elapsed: null, abortController: null },
+      mcqs: { content: "", loading: false, elapsed: null, abortController: null },
+      flashcards: { content: "", loading: false, elapsed: null, abortController: null },
     });
   }
 
@@ -245,21 +300,26 @@ export default function App() {
     setLastChunks([]);
     setChatElapsed(null);
 
+    const controller = new AbortController();
+    setAbortController(controller);
+
     try {
-      const { text: finalAnswer, elapsed } = await askQuestion(q, mode, (partial) => {
+      const { text: finalAnswer, elapsed, aborted } = await askQuestion(q, mode, (partial) => {
         setStreamingAnswer({ question: q, answer: partial });
-      });
+      }, controller.signal);
+
       const chunks = await getLastRetrieved();
       setLastChunks(chunks);
       setChatElapsed(elapsed);
-      setMessages(prev => [...prev, { question: q, answer: finalAnswer, elapsed, chunks }]);
+      setMessages(prev => [...prev, { question: q, answer: aborted ? finalAnswer + " [Cancelled]" : finalAnswer, elapsed, chunks }]);
       setStats(prev => ({ ...prev, question_count: prev.question_count + 1 }));
-      triggerCompleted("chat");
+      if (!aborted) triggerCompleted("chat");
     } catch (err) {
       setMessages(prev => [...prev, { question: q, answer: `Error: ${err.message}`, elapsed: null, chunks: [] }]);
     } finally {
       setStreamingAnswer(null);
       setAsking(false);
+      setAbortController(null);
     }
   }
 
@@ -271,13 +331,18 @@ export default function App() {
   }
 
   async function runPanel(key, generator) {
-    setPanel(key, { loading: true, content: "", elapsed: null });
+    setPanel(key, { loading: true, content: "", elapsed: null, abortController: null });
+    const controller = new AbortController();
+    setPanel(key, { abortController: controller });
     try {
-      const { text, elapsed } = await generator(partial => setPanel(key, { content: partial }));
-      setPanel(key, { content: text, loading: false, elapsed });
-      triggerCompleted(key);
+      const { text, elapsed, aborted } = await generator(
+        partial => setPanel(key, { content: partial }),
+        controller.signal
+      );
+      setPanel(key, { content: text + (aborted ? "\n\n[Cancelled]" : ""), loading: false, elapsed, abortController: null });
+      if (!aborted) triggerCompleted(key);
     } catch (err) {
-      setPanel(key, { content: `Error: ${err.message}`, loading: false, elapsed: null });
+      setPanel(key, { content: `Error: ${err.message}`, loading: false, elapsed: null, abortController: null });
     }
   }
 
@@ -291,8 +356,10 @@ export default function App() {
   const hasOutputs = Object.values(panelState).some(p => p.content);
 
   return (
-    <div className={`app-shell ${isResizing ? 'resizing' : ''}`} style={{ "--sidebar-width": `${sidebarWidth}px` }}>
+    <div className={`app-shell ${isResizing ? 'resizing' : ''}`} style={{ "--sidebar-width": isSidebarOpen ? `${sidebarWidth}px` : "60px" }}>
       <Sidebar
+        isOpen={isSidebarOpen}
+        setIsOpen={setIsSidebarOpen}
         files={files}
         onUpload={handleUpload}
         onRemove={removeFile}
@@ -319,24 +386,24 @@ export default function App() {
         </header>
 
         <nav className="tabs">
-            {TABS.map(tab => {
-              const isLoading = tab.id === "chat" ? asking : panelState[tab.id]?.loading;
-              const isCompleted = completedTabs[tab.id] && !isLoading;
-              
-              let label = tab.label;
-              if (isLoading) label = `${tab.label} ⟳`;
-              else if (isCompleted) label = `${tab.label} ✓`;
+          {TABS.map(tab => {
+            const isLoading = tab.id === "chat" ? asking : panelState[tab.id]?.loading;
+            const isCompleted = completedTabs[tab.id] && !isLoading;
 
-              return (
-                <button
-                  key={tab.id}
-                  className={`tab-btn ${activeTab === tab.id ? "active" : ""} ${isLoading ? "loading" : ""}`}
-                  onClick={() => setActiveTab(tab.id)}
-                >
-                  <span className="tab-icon">{tab.icon}</span> {label}
-                </button>
-              );
-            })}
+            let label = tab.label;
+            if (isLoading) label = `${tab.label} ⟳`;
+            else if (isCompleted) label = `${tab.label} ✓`;
+
+            return (
+              <button
+                key={tab.id}
+                className={`tab-btn ${activeTab === tab.id ? "active" : ""} ${isLoading ? "loading" : ""}`}
+                onClick={() => setActiveTab(tab.id)}
+              >
+                <span className="tab-icon">{tab.icon}</span> {label}
+              </button>
+            );
+          })}
         </nav>
 
         {!stats.ready ? (
@@ -362,6 +429,7 @@ export default function App() {
                 onChunkClick={setSelectedChunk}
                 chatScrollRef={chatScrollRef}
                 handleChatScroll={handleChatScroll}
+                abortController={abortController}
               />
             )}
 
@@ -434,8 +502,8 @@ export default function App() {
               <button className="highlight-modal-close" onClick={() => setSelectedChunk(null)}>✕</button>
             </div>
             <div className="highlight-modal-body">
-              <img 
-                src={getHighlightUrl(selectedChunk.source, selectedChunk.page, selectedChunk.chunk_id)} 
+              <img
+                src={getHighlightUrl(selectedChunk.source, selectedChunk.page, selectedChunk.chunk_id)}
                 alt={`Highlighted page ${selectedChunk.page} from ${selectedChunk.source}`}
               />
             </div>
@@ -476,9 +544,9 @@ function WelcomeState({ uploading, uploadError }) {
       <div className="welcome-icon">
         <img src="/logo.png" alt="AI Study Assistant logo" className="welcome-logo" />
       </div>
-      <h2>Turn Any PDF Into Your AI Study Partner</h2>
+      <h2>Turn Any Document Into Your AI Study Partner</h2>
       <p className="lead">
-        Upload a PDF and this turns into a chat partner, a note-taker, and a quiz
+        Upload a PDF, Word document, or text file and this turns into a chat partner, a note-taker, and a quiz
         generator, MCQs generator — all grounded in what's actually in your document.
       </p>
 
@@ -507,10 +575,10 @@ function WelcomeState({ uploading, uploadError }) {
             ))}
           </div>
           <p className="welcome-cta">
-            ⬆ Upload one or more PDFs from the <strong>sidebar</strong> to begin.
+            ⬆ Upload one or more documents from the <strong>sidebar</strong> to begin.
           </p>
           <div style={{ marginTop: "24px", fontSize: "12px", color: "var(--text-muted)" }}>
-            Copyright (c) 2026 Studiora AI
+            Copyright © 2026 Studiora AI
           </div>
         </>
       )}
@@ -520,31 +588,87 @@ function WelcomeState({ uploading, uploadError }) {
 
 
 /* ── Sidebar ───────────────────────────────────────────────────────────── */
-function Sidebar({ files, onUpload, onRemove, stats, onReset, hasOutputs, uploading, uploadError, setIsResizing, isResizing }) {
+function Sidebar({ isOpen, setIsOpen, files, onUpload, onRemove, stats, onReset, hasOutputs, uploading, uploadError, setIsResizing, isResizing }) {
   const inputRef = useRef(null);
+  const [isDragging, setIsDragging] = useState(false);
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e) => {
+    e.preventDefault();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setIsDragging(false);
+    if (uploading) return;
+    
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      onUpload({ target: { files: e.dataTransfer.files } });
+    }
+  };
+
+  if (!isOpen) {
+    return (
+      <aside className="sidebar sidebar-closed" style={{ padding: "10px 12px", alignItems: "center" }}>
+        <button 
+          className="sidebar-toggle-btn" 
+          onClick={() => setIsOpen(true)}
+          title="Open sidebar"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+            <line x1="9" y1="3" x2="9" y2="21"></line>
+          </svg>
+        </button>
+      </aside>
+    );
+  }
 
   return (
     <aside className="sidebar">
-      <div 
+      <div
         className={`sidebar-resizer ${isResizing ? 'active' : ''}`}
         onMouseDown={() => setIsResizing && setIsResizing(true)}
       />
       <div>
-        <h3>Upload PDFs</h3>
-        <div className={`dropzone ${uploading ? "dropzone-loading" : ""}`} onClick={() => !uploading && inputRef.current?.click()}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+          <h3 style={{ margin: 0 }}>Upload PDFs</h3>
+          <button 
+            className="sidebar-toggle-btn" 
+            onClick={() => setIsOpen(false)}
+            title="Close sidebar"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+              <line x1="9" y1="3" x2="9" y2="21"></line>
+            </svg>
+          </button>
+        </div>
+        <div 
+          className={`dropzone ${uploading ? "dropzone-loading" : ""} ${isDragging ? "dropzone-active" : ""}`} 
+          onClick={() => !uploading && inputRef.current?.click()}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+        >
           {uploading ? (
             <>
               <Spinner size={32} />
-              <p style={{ fontSize: 13, marginTop: 8 }}>Processing PDF…</p>
+              <p style={{ fontSize: 13, marginTop: 8 }}>Processing Document…</p>
             </>
           ) : (
             <>
               <p>Drag and drop files here</p>
-              <p style={{ fontSize: 11 }}>Limit 200MB per file • PDF</p>
+              <p style={{ fontSize: 11 }}>Limit 200MB per file • PDF, DOCX, TXT</p>
               <button className="btn" type="button" style={{ marginTop: 8 }}>Browse files</button>
             </>
           )}
-          <input ref={inputRef} type="file" accept=".pdf" multiple hidden onChange={onUpload} disabled={uploading} />
+          <input ref={inputRef} type="file" accept=".pdf,.docx,.doc,.txt" multiple hidden onChange={onUpload} disabled={uploading} />
         </div>
         {uploadError && (
           <div className="upload-error-inline">⚠️ {uploadError}</div>
@@ -553,7 +677,7 @@ function Sidebar({ files, onUpload, onRemove, stats, onReset, hasOutputs, upload
           {files.map(f => (
             <div className="file-chip" key={f.name}>
               <div>
-                <div className="name">{f.name}</div>
+                <div className="name" title={f.name}>{f.name}</div>
                 <div className="meta">{(f.size / 1024).toFixed(1)}KB</div>
               </div>
               <button onClick={() => onRemove(f.name)}>✕</button>
@@ -605,7 +729,8 @@ function ChatPanel({
   messages, streamingAnswer, lastChunks, chatElapsed,
   question, setQuestion, onKeyDown, onSend, asking,
   mode, setMode, chatEndRef, onCopy, copiedIndex,
-  onChunkClick, chatScrollRef, handleChatScroll
+  onChunkClick, chatScrollRef, handleChatScroll,
+  abortController
 }) {
   const hasMessages = messages.length > 0 || streamingAnswer;
   const [modeOpen, setModeOpen] = useState(false);
@@ -634,7 +759,7 @@ function ChatPanel({
       <div className="chat-scroll" ref={chatScrollRef} onScroll={handleChatScroll}>
         {!hasMessages && (
           <div className="empty-state">
-            💬 Ask anything about your uploaded PDFs to get started
+            💬 Ask anything about your uploaded documents to get started
           </div>
         )}
 
@@ -643,12 +768,7 @@ function ChatPanel({
         ))}
 
         {streamingAnswer && (
-          <>
-            <ChatTurn msg={streamingAnswer} isStreaming />
-            <div style={{ padding: "4px 0 12px 4px" }}>
-              <Spinner label="Thinking…" />
-            </div>
-          </>
+          <ChatTurn msg={streamingAnswer} isStreaming abortController={abortController} />
         )}
 
 
@@ -656,56 +776,60 @@ function ChatPanel({
       </div>
 
       {/* ── Input bar ── */}
-      <div className="chat-input-row">
-        <div className="mode-selector-wrap" ref={pillRef}>
-          <button
-            className={`mode-toggle-btn ${modeOpen ? "active" : ""}`}
-            onClick={() => setModeOpen(o => !o)}
-          >
-            <span className="mode-opt-icon">{MODE_META[mode].icon}</span>
-            <span className="mode-name">{mode}</span>
-            <span className="mode-opt-chevron">{modeOpen ? "▲" : "▼"}</span>
-          </button>
+      <div className="chat-input-container" style={{ padding: '0 20px 5px', maxWidth: '840px', margin: '0 auto', width: '100%' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', paddingLeft: '16px' }}>
+          <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', flexShrink: 0 }}>Response style</span>
+          <div className="mode-selector-wrap" ref={pillRef} style={{ position: 'relative', width: 'auto', margin: 0, padding: 0 }}>
+            <button
+              className={`mode-toggle-btn ${modeOpen ? "active" : ""}`}
+              onClick={() => setModeOpen(o => !o)}
+            >
+              <span className="mode-opt-icon">{MODE_META[mode].icon}</span>
+              <span className="mode-name">{mode}</span>
+              <span className="mode-opt-chevron">{modeOpen ? "▲" : "▼"}</span>
+            </button>
 
-          {/* Floating mode popover */}
-          {modeOpen && (
-            <div className="mode-popover">
-              <div className="mode-popover-title">Answer Mode</div>
-              {ANSWER_MODES.map(m => (
-                <button
-                  key={m}
-                  className={`mode-option ${mode === m ? "selected" : ""}`}
-                  onClick={() => { setMode(m); setModeOpen(false); }}
-                >
-                  <span className="mode-opt-icon">{MODE_META[m].icon}</span>
-                  <span className="mode-opt-body">
-                    <span className="mode-opt-name">{m}</span>
-                    <span className="mode-opt-desc">{MODE_META[m].desc}</span>
-                  </span>
-                  {mode === m && <span className="mode-opt-check">✓</span>}
-                </button>
-              ))}
-            </div>
-          )}
+            {/* Floating mode popover */}
+            {modeOpen && (
+              <div className="mode-popover" style={{ bottom: '100%', left: '0', marginBottom: '8px' }}>
+                <div className="mode-popover-title">Answer Mode</div>
+                {ANSWER_MODES.map(m => (
+                  <button
+                    key={m}
+                    className={`mode-option ${mode === m ? "selected" : ""}`}
+                    onClick={() => { setMode(m); setModeOpen(false); }}
+                  >
+                    <span className="mode-opt-icon">{MODE_META[m].icon}</span>
+                    <span className="mode-opt-body">
+                      <span className="mode-opt-name">{m}</span>
+                      <span className="mode-opt-desc">{MODE_META[m].desc}</span>
+                    </span>
+                    {mode === m && <span className="mode-opt-check">✓</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
-        <div className="chat-input-pill">
-          {/* LEFT: + button */}
-          <div className="pill-left">
-            <button
-              className={`plus-btn ${modeOpen ? "active" : ""}`}
-              onClick={() => setModeOpen(o => !o)}
-              title="Toggle answer mode"
-            >
-              +
-            </button>
-          </div>
+        <div className="chat-input-row" style={{ maxWidth: 'none', padding: 0 }}>
+          <div className="chat-input-pill">
+            {/* LEFT: + button */}
+            <div className="pill-left">
+              <button
+                className={`plus-btn ${modeOpen ? "active" : ""}`}
+                onClick={() => setModeOpen(o => !o)}
+                title="Toggle answer mode"
+              >
+                +
+              </button>
+            </div>
 
-          {/* MIDDLE: textarea */}
-          <textarea
-            ref={textareaRef}
-            placeholder="Ask anything from your PDFs…"
-            value={question}
+             {/* MIDDLE: textarea */}
+             <textarea
+             ref={textareaRef}
+             placeholder="Ask anything from your documents…"
+             value={question}
             onChange={e => setQuestion(e.target.value)}
             onKeyDown={onKeyDown}
             rows={1}
@@ -719,11 +843,13 @@ function ChatPanel({
           </button>
         </div>
       </div>
+      </div>
     </div>
   );
 }
 
-function ChatTurn({ msg, onCopy, isStreaming, index, copied, onChunkClick }) {
+function ChatTurn({ msg, onCopy, isStreaming, index, copied, onChunkClick, abortController }) {
+  const [feedback, setFeedback] = useState(null);
   return (
     <div className="chat-turn">
       <div className="user-bubble">👤 {msg.question}</div>
@@ -734,31 +860,71 @@ function ChatTurn({ msg, onCopy, isStreaming, index, copied, onChunkClick }) {
           <div style={{ display: 'flex', gap: '8px' }}>
             <span>🤖</span>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
-                {msg.answer}
+              <ReactMarkdown 
+                remarkPlugins={[remarkMath]} 
+                rehypePlugins={[rehypeKatex]}
+                components={{ span: MathCopySpan }}
+              >
+                {preprocessLaTeX(msg.answer)}
               </ReactMarkdown>
               {isStreaming && <span style={{ opacity: 0.5 }}>▍</span>}
-              {!isStreaming && msg.elapsed && (
-                <div style={{ marginTop: "16px", fontSize: "0.75rem", color: "var(--text-muted)", fontStyle: "italic", textAlign: "right", opacity: 0.8 }}>
-                  ✨ Generated by GLM-4 Flash in {msg.elapsed}s
-                </div>
-              )}
             </div>
           </div>
-        </div>
-        {!isStreaming && (
-          <button
-            className={`copy-btn-overlay ${copied ? "copied" : ""}`}
-            title={copied ? "Copied!" : "Copy answer"}
-            onClick={() => onCopy(msg.answer, index)}
-          >
-            {copied ? (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+          
+          <div className="assistant-action-bar">
+            {isStreaming ? (
+              <button 
+                className="action-btn stop-btn"
+                onClick={() => { if (abortController) abortController.abort(); }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2" ry="2"/></svg>
+                Stop generating
+              </button>
             ) : (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              <>
+                <button 
+                  className="action-btn" 
+                  onClick={() => onCopy(msg.answer, index)}
+                  title={copied ? "Copied!" : "Copy answer"}
+                >
+                  {copied ? (
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
+                  ) : (
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
+                  )}
+                  {copied ? "Copied" : "Copy"}
+                </button>
+                
+                <button className="action-btn">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+                    <path d="M3 3v5h5"></path>
+                  </svg>
+                  Regenerate
+                </button>
+                
+                <button 
+                  className={`action-btn icon-only ${feedback === 'like' ? 'selected' : ''}`}
+                  title="Helpful"
+                  onClick={() => setFeedback(feedback === 'like' ? null : 'like')}
+                >
+                  👍
+                </button>
+                <button 
+                  className={`action-btn icon-only ${feedback === 'dislike' ? 'selected' : ''}`}
+                  title="Not helpful"
+                  onClick={() => setFeedback(feedback === 'dislike' ? null : 'dislike')}
+                >
+                  👎
+                </button>
+                
+                <div style={{ marginLeft: 'auto', fontSize: '11px', color: 'var(--text-muted)', fontStyle: 'italic', opacity: 0.7 }}>
+                  ✨ Generated by GLM 4
+                </div>
+              </>
             )}
-          </button>
-        )}
+          </div>
+        </div>
       </div>
 
       {/* Meta row — elapsed + retrieved chunks, shown below bubble */}
@@ -770,6 +936,20 @@ function ChatTurn({ msg, onCopy, isStreaming, index, copied, onChunkClick }) {
           )}
         </div>
       )}
+
+      {/* Streaming spinner, shown below bubble */}
+      {isStreaming && (
+        <div style={{ display: 'flex', justifyContent: 'center', width: '100%' }}>
+          <div className="generating-pill" style={{ marginTop: "12px" }}>
+            <div className="generating-text">
+              <svg className="svg-spinner" width="14" height="14" viewBox="0 0 50 50">
+                <circle className="path" cx="25" cy="25" r="20" fill="none" strokeWidth="5"></circle>
+              </svg>
+              Generating...
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -779,6 +959,7 @@ function GenerationPanel({
   title, buttonLabel, ps, onGenerate, downloadUrl, downloadLabel, renderMath,
 }) {
   const [copied, setCopied] = useState(false);
+  const [feedback, setFeedback] = useState(null);
   const isStreaming = ps.loading;
   const hasContent = Boolean(ps.content);
 
@@ -807,44 +988,81 @@ function GenerationPanel({
             <div className="panel-header-row">
               <h3 style={{ marginTop: 0 }}>{title}</h3>
               {!isStreaming && <ElapsedBadge seconds={ps.elapsed} />}
-              {isStreaming && <span className="stream-live-badge">&#9679; Generating…</span>}
+              {isStreaming && (
+                <div className="generating-pill">
+                  <div className="generating-text">
+                    <svg className="svg-spinner" width="14" height="14" viewBox="0 0 50 50">
+                      <circle className="path" cx="25" cy="25" r="20" fill="none" strokeWidth="5"></circle>
+                    </svg>
+                    Generating...
+                  </div>
+                  <div style={{ width: "1px", height: "14px", background: "var(--border-subtle)" }}></div>
+                  <button
+                    className="generating-cancel-btn"
+                    onClick={() => { if (ps.abortController) ps.abortController.abort(); }}
+                  >
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2" ry="2"/></svg>
+                    Cancel
+                  </button>
+                </div>
+              )}
             </div>
 
             <div className="panel-output">
-              {!isStreaming && (
-                <button
-                  className={`copy-btn-overlay ${copied ? "copied" : ""}`}
-                  title={copied ? "Copied!" : "Copy content"}
-                  onClick={handleCopy}
-                >
-                  {copied ? (
-                    <>
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
-                      <span style={{ fontSize: "11px", fontWeight: "bold", marginLeft: "4px", marginRight: "4px" }}>Copied!</span>
-                    </>
-                  ) : (
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                  )}
-                </button>
-              )}
               {renderMath ? (
-                <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
-                  {ps.content}
+                <ReactMarkdown 
+                  remarkPlugins={[remarkMath]} 
+                  rehypePlugins={[rehypeKatex]}
+                  components={{ span: MathCopySpan }}
+                >
+                  {preprocessLaTeX(ps.content)}
                 </ReactMarkdown>
               ) : (
                 <ReactMarkdown>{ps.content}</ReactMarkdown>
               )}
               {/* Blinking cursor while streaming */}
               {isStreaming && <span className="stream-cursor">&#9614;</span>}
+
+              {!isStreaming && (
+                <div className="assistant-action-bar" style={{ marginTop: '16px', paddingTop: '12px', borderTop: '1px solid var(--border-lighter)' }}>
+                  <button 
+                    className="action-btn icon-only" 
+                    onClick={handleCopy}
+                    title={copied ? "Copied!" : "Copy content"}
+                  >
+                    {copied ? (
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
+                    ) : (
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
+                    )}
+                  </button>
+                  <button 
+                    className={`action-btn icon-only ${feedback === 'like' ? 'selected' : ''}`}
+                    style={{ fontSize: '16px' }}
+                    title="Helpful"
+                    onClick={() => setFeedback(feedback === 'like' ? null : 'like')}
+                  >
+                    👍
+                  </button>
+                  <button 
+                    className={`action-btn icon-only ${feedback === 'dislike' ? 'selected' : ''}`}
+                    style={{ fontSize: '16px' }}
+                    title="Not helpful"
+                    onClick={() => setFeedback(feedback === 'dislike' ? null : 'dislike')}
+                  >
+                    👎
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Download + regenerate only appear when done */}
             {!isStreaming && (
               <>
                 {downloadUrl && (
-                  <a className="btn panel-download" href={downloadUrl}>{downloadLabel}</a>
+                  <a className="btn panel-download" href={downloadUrl} style={{ marginTop: '16px' }}>{downloadLabel}</a>
                 )}
-                <div className="panel-action-inline">
+                <div className="panel-action-inline" style={{ marginTop: downloadUrl ? '8px' : '16px' }}>
                   <button className="panel-generate-btn" onClick={onGenerate}>
                     🔄 Regenerate
                   </button>
@@ -872,6 +1090,7 @@ function GenerationPanel({
 }  /* ── Flashcards panel ────────────────────────────────────────── */
 function FlashcardsPanel({ ps, onGenerate, downloadUrl }) {
   const [copied, setCopied] = useState(false);
+  const [feedback, setFeedback] = useState(null);
   const isStreaming = ps.loading;
   const cards = parseFlashcards(ps.content);
   const hasAnyContent = Boolean(ps.content);
@@ -900,36 +1119,74 @@ function FlashcardsPanel({ ps, onGenerate, downloadUrl }) {
           <>
             <div className="panel-header-row" style={{ position: "relative" }}>
               <h3 style={{ marginTop: 0 }}>🃏 Flashcards</h3>
-              <ElapsedBadge seconds={ps.elapsed} />
-              {!isStreaming && (
-                <button
-                  className={`copy-btn-overlay ${copied ? "copied" : ""}`}
-                  style={{ top: "0", right: "0" }}
-                  title={copied ? "Copied!" : "Copy flashcards text"}
-                  onClick={handleCopy}
-                >
-                  {copied ? (
-                    <>
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
-                      <span style={{ fontSize: "11px", fontWeight: "bold", marginLeft: "4px", marginRight: "4px" }}>Copied!</span>
-                    </>
-                  ) : (
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                  )}
-                </button>
+              {!isStreaming && <ElapsedBadge seconds={ps.elapsed} />}
+              {isStreaming && (
+                <div className="generating-pill">
+                  <div className="generating-text">
+                    <svg className="svg-spinner" width="14" height="14" viewBox="0 0 50 50">
+                      <circle className="path" cx="25" cy="25" r="20" fill="none" strokeWidth="5"></circle>
+                    </svg>
+                    Generating...
+                  </div>
+                  <div style={{ width: "1px", height: "14px", background: "var(--border-subtle)" }}></div>
+                  <button
+                    className="generating-cancel-btn"
+                    onClick={() => { if (ps.abortController) ps.abortController.abort(); }}
+                  >
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2" ry="2"/></svg>
+                    Cancel
+                  </button>
+                </div>
               )}
             </div>
-            {cards.map((card, i) => (
-              <details className="flashcard" key={i}>
-                <summary>🃏 {card.front}</summary>
-                <div className="back">{card.back}</div>
-              </details>
-            ))}
-            {downloadUrl && (
-              <a className="btn panel-download" href={downloadUrl}>📥 Download Flashcards PDF</a>
-            )}
-            <div className="panel-action-inline">
-              <button className="panel-generate-btn" onClick={onGenerate}>🔄 Regenerate</button>
+            <div className="flashcards-container">
+              {cards.map((card, i) => (
+                <details className="flashcard" key={i}>
+                  <summary>🃏 {card.front}</summary>
+                  <div className="back">{card.back}</div>
+                </details>
+              ))}
+              {!isStreaming && (
+                <div className="assistant-action-bar" style={{ marginTop: '16px', paddingTop: '12px', borderTop: '1px solid var(--border-lighter)' }}>
+                  <button 
+                    className="action-btn icon-only" 
+                    onClick={handleCopy}
+                    title={copied ? "Copied!" : "Copy flashcards text"}
+                  >
+                    {copied ? (
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
+                    ) : (
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
+                    )}
+                  </button>
+                  <button 
+                    className={`action-btn icon-only ${feedback === 'like' ? 'selected' : ''}`}
+                    style={{ fontSize: '16px' }}
+                    title="Helpful"
+                    onClick={() => setFeedback(feedback === 'like' ? null : 'like')}
+                  >
+                    👍
+                  </button>
+                  <button 
+                    className={`action-btn icon-only ${feedback === 'dislike' ? 'selected' : ''}`}
+                    style={{ fontSize: '16px' }}
+                    title="Not helpful"
+                    onClick={() => setFeedback(feedback === 'dislike' ? null : 'dislike')}
+                  >
+                    👎
+                  </button>
+                </div>
+              )}
+              {!isStreaming && (
+                <>
+                  {downloadUrl && (
+                    <a className="btn panel-download" href={downloadUrl} style={{ marginTop: '16px' }}>📥 Download Flashcards PDF</a>
+                  )}
+                  <div className="panel-action-inline" style={{ marginTop: downloadUrl ? '8px' : '16px' }}>
+                    <button className="panel-generate-btn" onClick={onGenerate}>🔄 Regenerate</button>
+                  </div>
+                </>
+              )}
             </div>
           </>
         ) : (
