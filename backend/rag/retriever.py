@@ -1,14 +1,14 @@
 import os
 import numpy as np
-from openai import OpenAI
+from openai import AsyncOpenAI
 
-client = OpenAI(
+client = AsyncOpenAI(
     api_key=os.getenv("JINA_API_KEY"),
     base_url="https://api.jina.ai/v1"
 )
 
-def get_query_embedding(question):
-    response = client.embeddings.create(
+async def get_query_embedding(question):
+    response = await client.embeddings.create(
         model="jina-embeddings-v4",
         input=[question]
     )
@@ -19,9 +19,9 @@ def get_query_embedding(question):
     )
 
 
-def retrieve_context(question, index, documents, k=3):
+async def retrieve_context(question, index, documents, k=3):
 
-    query_embedding = get_query_embedding(question)
+    query_embedding = await get_query_embedding(question)
 
     distances, indices = index.search(query_embedding, k)
 
@@ -52,3 +52,4 @@ def retrieve_context(question, index, documents, k=3):
         })
 
     return context, list(set(sources)), retrieved_docs
+
