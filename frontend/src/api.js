@@ -112,3 +112,4 @@ export function getHighlightUrl(source, page, chunk_id) {
   return `${BASE_URL}/api/highlight?${params.toString()}`;
 }
 
+
