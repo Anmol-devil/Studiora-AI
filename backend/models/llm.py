@@ -143,23 +143,38 @@ async def stream_chat(model_name, messages, options=None):
             if "message" in chunk:
                 yield chunk["message"]["content"]
 
-def _generation_stream(messages, state_key, state, model_name="glm-4-flash"):
+
+def _generation_stream(
+    messages,
+    state_key,
+    state,
+    model_name="glm-4-flash",
+    options=None,
+):
     async def event_stream():
         full_response = ""
         start = time.time()
-        async for piece in stream_chat(model_name, messages):
+
+        async for piece in stream_chat(
+            model_name,
+            messages,
+            options=options,
+        ):
             full_response += piece
             yield piece
+
         elapsed = round(time.time() - start, 2)
+
         state[state_key] = full_response
-        state["last_elapsed"][state_key] = elapsed
+        state.setdefault("last_elapsed", {})[state_key] = elapsed
 
     return StreamingResponse(
-        event_stream(), 
+        event_stream(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
-            "X-Accel-Buffering": "no"
-        }
+            "X-Accel-Buffering": "no",
+        },
     )
+
