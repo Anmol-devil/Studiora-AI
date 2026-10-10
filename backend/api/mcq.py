@@ -50,7 +50,7 @@ Before generating a question, verify:
 
 If any answer is NO, skip that question.
 Document:
-{text[:50000]}
+{text[:100000]}
 """
     user_prompt = f"Here is the document text. and generate the MCQs:\n{text}\n</Document>"
 
