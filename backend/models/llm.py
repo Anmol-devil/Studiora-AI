@@ -75,7 +75,7 @@ Rules:
 Answer according to the question.and also give outside answer.
 """
 
-   return f"""
+    return f"""
 You are Studiora AI, a document-based AI study assistant.
 
 Rules:
