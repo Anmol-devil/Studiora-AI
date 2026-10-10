@@ -489,7 +489,7 @@ export default function App() {
         )}
 
         <footer className="app-footer">
-          Built with PyMuPDF • SentenceTransformers • FAISS • GLM 4 Flash • FastAPI • React • By Anmol
+          Built with PyMuPDF • SentenceTransformers • FAISS • GLM 4 Flash • FastAPI • React
         </footer>
       </div>
 
