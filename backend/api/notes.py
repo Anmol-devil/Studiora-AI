@@ -13,12 +13,13 @@ You are an expert teacher.
 Create study notes from this document.
 Include:
 1. Key Concepts
-2. Important Definitions in details. Each Definitions in 2-3 lines.
-3. Important Formulas
-4. Interview Questions
-5. Exam Questions
-6. Quick Revision Notes
+2. Important Definitions in details. Each Definitions in 3-4 lines.
+3. Important Formulas 
+4. Interview Questions like real interview question almost 5-7 Questions.
+5. Exam Questions contains 7-10 questions
+6. Quick Revision Notes minimum 5.
+7. In the proper format that looks real notes.
 Document:
-{text[:20000]}
+{text[:30000]}
 """
     return _generation_stream([{"role": "user", "content": prompt}], "notes", state)
