@@ -250,22 +250,3 @@ async def ask(question: str = Form(...), mode: str = Form("Question Answering"),
         }
     )
 
-
-@app.post("/api/summary")
-def generate_summary_route(x_session_id: str = Header(None)):
-    state = get_session_state(x_session_id)
-    text = state["combined_text"]
-    prompt = f"""
-Summarize the following document.
-Provide:
-1. Executive Summary
-2. Key Concepts
-3. Important Findings
-4. Final Takeaways
-
-Document:
-
-{text[:5000]}
-"""
-    return _generation_stream([{"role": "user", "content": prompt}], "summary", state)
-
